@@ -2,17 +2,33 @@
 import csv,queue,threading,time,math,json,os
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk,filedialog
+from tkinter import ttk,filedialog,messagebox
 from .driver import TC3,SCALE_LABELS,SCALE_MV,TIME_LABELS
+from .updater import device_ports,install_firmware
+from .i18n import translate
+
+class LocalizedVar(tk.StringVar):
+    def __init__(self,owner,value):
+        self.owner=owner;self.original=value
+        super().__init__(master=owner.root,value=owner.tr(value))
+    def set(self,value):
+        self.original=value;super().set(self.owner.tr(value))
+    def refresh(self):super().set(self.owner.tr(self.original))
 
 class Scope:
     def __init__(self,root):
-        self.root=root;root.title('FNIRSI DSO-TC3 — PC Osiloskop');root.geometry('1060x770');root.minsize(760,590)
+        self.root=root;root.title('Retro Saver · FNIRSI DSO-TC3 PC v1.0');root.geometry('1060x770');root.minsize(760,590)
+        self.settings_path=Path(os.environ.get('LOCALAPPDATA',str(Path.home()/'.local/share')))/'FNIRSI-TC3-PC/settings.json'
+        try:self.language=json.loads(self.settings_path.read_text(encoding='utf-8')).get('language','tr')
+        except (OSError,ValueError):self.language='tr'
+        self.static_texts=[]
         root.configure(bg='#151b23')
         self.events=queue.Queue();self.stop=threading.Event();self.thread=None
         self.commands=queue.Queue();self.device_controls={}
         self.samples=[];self.metadata={}
+        self.zoom_x=1.;self.zoom_y=1.;self.pan_x=0.;self.pan_y=0.;self.drag_origin=None
         self.frame_count=0;self.last_saved=0
+        self.updating=False;self.auto_connect=True
         self.mode='BEKLE'
         style=ttk.Style(root);style.theme_use('clam')
         style.configure('TFrame',background='#151b23')
@@ -24,13 +40,21 @@ class Scope:
         tk.Label(masthead,text='DSO-TC3  /  PC OSCILLOSCOPE',font=('Segoe UI',12),fg='#9aaaba',bg='#151b23').pack(side='right')
         toolbar=ttk.Frame(root,padding=(20,12));toolbar.pack(fill='x')
         ttk.Label(toolbar,text='USB portu:').pack(side='left')
-        self.port=tk.StringVar(value='COM7')
+        self.port=tk.StringVar(value='Otomatik')
         ttk.Entry(toolbar,textvariable=self.port,width=12).pack(side='left',padx=8)
         self.start_button=ttk.Button(toolbar,text='Başlat',command=self.start);self.start_button.pack(side='left',padx=4)
         ttk.Button(toolbar,text='HOLD',command=self.hold).pack(side='left',padx=4)
         ttk.Button(toolbar,text='CSV kaydet',command=self.save).pack(side='right')
+        self.firmware_button=ttk.Button(toolbar,text='Firmware kur',command=self.install);self.firmware_button.pack(side='right',padx=6)
+        self.language_var=tk.StringVar(value='English' if self.language=='en' else 'Türkçe')
+        language_picker=ttk.Combobox(toolbar,textvariable=self.language_var,values=('Türkçe','English'),width=8,state='readonly');language_picker.pack(side='right',padx=5)
+        language_picker.bind('<<ComboboxSelected>>',lambda event:self.set_language('en' if self.language_var.get()=='English' else 'tr'))
+        zoom_bar=ttk.Frame(root,padding=(20,0,20,8));zoom_bar.pack(fill='x')
+        for label,command in [('X +',lambda:self.zoom(1.5,1)),('X −',lambda:self.zoom(1/1.5,1)),('Y +',lambda:self.zoom(1,1.5)),('Y −',lambda:self.zoom(1,1/1.5)),('Sıfırla',self.reset_zoom),('Dalgalanmayı ortala',self.centre_ripple)]:
+            ttk.Button(zoom_bar,text=label,command=command).pack(side='left',padx=2)
+        ttk.Label(zoom_bar,text='Tekerlek: X zoom · Shift: Y zoom · Sürükle: kaydır').pack(side='left',padx=10)
         self.canvas=tk.Canvas(root,bg='#101923',highlightthickness=2,highlightbackground='#536273');self.canvas.pack(fill='both',expand=True,padx=20,pady=(0,8))
-        self.status=tk.StringVar(value='Cihazdan henüz örnek alınmadı.')
+        self.status=LocalizedVar(self,'Cihazdan henüz örnek alınmadı.')
         ttk.Label(root,textvariable=self.status,padding=(20,5)).pack(fill='x')
         settings=ttk.Frame(root,padding=(20,6));settings.pack(fill='x')
         specs=[('scale_index','V/div',SCALE_LABELS),('probe_index','Prob',('X1','X10')),('timebase_index','Zaman/div',TIME_LABELS),('coupling_index','Bağlantı',('AC','DC')),('trigger_mode','Tetik',('Auto','Normal','Single'))]
@@ -39,15 +63,48 @@ class Scope:
             combo=ttk.Combobox(settings,values=values,width=8,state='disabled');combo.pack(side='left',padx=(0,10))
             combo.bind('<<ComboboxSelected>>',lambda event,n=name,c=combo:self.request_control(n,c.current()))
             self.device_controls[name]=combo
-        self.note=tk.StringVar(value='Firmware v2 bekleniyor · Voltaj ölçümleri ve cihaz kontrolü henüz etkin değil.')
+        self.note=LocalizedVar(self,'Firmware v2 bekleniyor · Voltaj ölçümleri ve cihaz kontrolü henüz etkin değil.')
         ttk.Label(root,textvariable=self.note,padding=(20,5),font=('Segoe UI',9)).pack(fill='x',pady=(0,8))
         self.canvas.bind('<Configure>',lambda event:self.draw())
+        self.canvas.bind('<MouseWheel>',self.wheel_zoom)
+        self.canvas.bind('<ButtonPress-1>',self.begin_pan)
+        self.canvas.bind('<B1-Motion>',self.drag_pan)
+        self.canvas.bind('<Double-Button-1>',lambda event:self.reset_zoom())
         root.protocol('WM_DELETE_WINDOW',self.close)
         root.after(50,self.poll)
+        root.after(1500,self.watch_usb)
+        self._register_texts(root)
+        self.refresh_language()
+    def tr(self,text):return translate(text,self.language)
+    def _register_texts(self,parent):
+        for widget in parent.winfo_children():
+            if 'text' in widget.keys() and not widget.cget('textvariable'):
+                text=widget.cget('text')
+                if text:self.static_texts.append((widget,text))
+            self._register_texts(widget)
+    def refresh_language(self):
+        for widget,text in self.static_texts:widget.configure(text=self.tr(text))
+        self.status.refresh();self.note.refresh();self.draw()
+    def set_language(self,language):
+        if language not in ('tr','en'):return
+        self.language=language;self.language_var.set('English' if language=='en' else 'Türkçe')
+        self.refresh_language()
+        try:
+            self.settings_path.parent.mkdir(parents=True,exist_ok=True)
+            self.settings_path.write_text(json.dumps({'language':language}),encoding='utf-8')
+        except OSError:self.note.set('Language preference could not be saved.')
     def start(self):
+        if self.updating:return
         if self.thread and self.thread.is_alive():return
+        port=self.port.get().strip()
+        if port.lower() in ('otomatik','auto',''):
+            ports=device_ports()
+            if len(ports)!=1:
+                self.status.set('USB bekleniyor · Tek bir DSO-TC3 bağlayın.');return
+            port=ports[0]
+        self.auto_connect=True
         self.stop.clear();self.mode='RUN';self.start_button.configure(state='disabled')
-        port=self.port.get().strip();self.status.set('Deneysel firmware bağlantısı kontrol ediliyor…')
+        self.status.set(f'{port} · Cihaz firmware bağlantısı kontrol ediliyor…')
         def work():
             try:
                 with TC3(port) as device:
@@ -94,6 +151,15 @@ class Scope:
                 elif kind=='error':self.mode='HATA';self.status.set('Bağlantı/okuma hatası: '+value);self.draw()
                 elif kind=='setting_error':self.note.set('Ayar uygulanamadı: '+value)
                 elif kind=='setting':self.metadata=value;self.note.set('Ayar cihazdan geri okunarak doğrulandı.');self.draw()
+                elif kind=='flash_progress':self.status.set(f'Firmware yükleniyor: %{value} · USB bağlantısını kesmeyin.')
+                elif kind=='flash_done':
+                    self.updating=False;self.auto_connect=True
+                    self.firmware_button.configure(state='normal');self.start_button.configure(state='normal')
+                    self.status.set('Yükleme tamamlandı. Cihazı güç tuşuyla açıp osiloskop ekranına geçin.')
+                elif kind=='flash_error':
+                    self.updating=False;self.auto_connect=False
+                    self.firmware_button.configure(state='normal');self.start_button.configure(state='normal')
+                    self.status.set('Yükleme durduruldu: '+value)
                 elif kind=='stopped':
                     self.start_button.configure(state='normal')
                     if self.mode=='RUN':self.mode='HOLD'
@@ -101,7 +167,25 @@ class Scope:
         except queue.Empty:pass
         self.root.after(50,self.poll)
     def hold(self):
+        self.auto_connect=False
         self.stop.set();self.mode='HOLD';self.status.set('HOLD · Son PC karesi donduruldu.');self.draw()
+    def watch_usb(self):
+        if self.auto_connect and not self.updating and not (self.thread and self.thread.is_alive()):self.start()
+        self.root.after(2000,self.watch_usb)
+    def install(self):
+        if self.updating:return
+        if not messagebox.askyesno(self.tr('DSO-TC3 V0.3 firmware kurulumu'),self.tr('Yalnızca desteklenen DSO-TC3 V0.3 içindir. Firmware değiştirmek cihazı çalışmaz hâle getirebilir.\n\nCihazı kapatıp ▼ + güç ile Bootloader OK ekranına geçin. Orijinal firmware yedeğinizi saklayın.\n\nBu cihaz için yüklemeyi başlatmak istiyor musunuz?')):return
+        self.updating=True;self.auto_connect=False;self.stop.set()
+        self.firmware_button.configure(state='disabled');self.start_button.configure(state='disabled')
+        self._start_installer()
+    def _start_installer(self):
+        if self.thread and self.thread.is_alive():self.root.after(100,self._start_installer);return
+        def work():
+            try:
+                install_firmware(lambda percent:self.events.put(('flash_progress',percent)))
+                self.events.put(('flash_done',None))
+            except Exception as error:self.events.put(('flash_error',str(error)))
+        self.thread=threading.Thread(target=work,daemon=True);self.thread.start()
     def toggle_run(self):
         if self.metadata.get('protocol_version')==2:self.request_control('device_hold',not self.metadata.get('device_hold',False))
         elif self.mode=='RUN':self.hold()
@@ -110,18 +194,62 @@ class Scope:
         if self.metadata.get('protocol_version')!=2:
             self.note.set('Bu kontrol için firmware v2 yüklenmeli.');return
         self.commands.put((name,value));self.note.set('Ayar cihaza gönderiliyor; geri okuma bekleniyor…')
+    def zoom(self,x,y,anchor=None):
+        old_x,old_y=self.zoom_x,self.zoom_y
+        self.zoom_x=max(1.,min(100.,old_x*x));self.zoom_y=max(1.,min(100.,old_y*y))
+        if anchor and hasattr(self,'view_bounds'):
+            left,top,right,bottom=self.plot_bounds
+            fx=max(0.,min(1.,(anchor[0]-left)/(right-left)))-.5
+            fy=.5-max(0.,min(1.,(anchor[1]-top)/(bottom-top)))
+            xmin,xmax,ymin,ymax=self.view_bounds
+            self.pan_x+=fx*(xmax-xmin)*(1-old_x/self.zoom_x)
+            self.pan_y+=fy*(ymax-ymin)*(1-old_y/self.zoom_y)
+        self.draw()
+    def wheel_zoom(self,event):
+        if not self.in_plot(event):return
+        factor=1.25 if event.delta>0 else 1/1.25
+        self.zoom(1,factor,(event.x,event.y)) if event.state&1 else self.zoom(factor,1,(event.x,event.y))
+        return 'break'
+    def in_plot(self,event):
+        if not hasattr(self,'plot_bounds'):return False
+        l,t,r,b=self.plot_bounds
+        return l<=event.x<=r and t<=event.y<=b
+    def begin_pan(self,event):
+        self.drag_origin=(event.x,event.y,self.pan_x,self.pan_y,self.view_bounds) if self.in_plot(event) and hasattr(self,'view_bounds') else None
+    def drag_pan(self,event):
+        if not self.drag_origin:return
+        x,y,px,py,(xmin,xmax,ymin,ymax)=self.drag_origin
+        l,t,r,b=self.plot_bounds
+        self.pan_x=px-(event.x-x)*(xmax-xmin)/(r-l)
+        self.pan_y=py+(event.y-y)*(ymax-ymin)/(b-t)
+        self.draw()
+    def reset_zoom(self):
+        self.zoom_x=self.zoom_y=1.;self.pan_x=self.pan_y=0.;self.draw()
+    def centre_ripple(self):
+        if not self.samples:return
+        start=max(0,min(300,self.metadata.get('trigger_sample',0))) if self.metadata.get('measurements') else 0
+        values=self.samples[start:start+300] if self.metadata.get('measurements') else self.samples
+        centre=sum(values)/len(values)
+        if self.metadata.get('measurements'):base=self.metadata.get('offset_raw',0);span=198.
+        else:
+            target=max(1,(max(values)-min(values))*1.25/8);exponent=10**math.floor(math.log10(target))
+            division=next(v*exponent for v in (1,2,5,10) if v*exponent>=target)
+            base=round(centre/division)*division;span=division*8
+        self.pan_y=centre-base;self.zoom_y=max(1.,min(100.,span/max(2.,(max(values)-min(values))*1.4)))
+        self.draw()
     def draw(self):
         c=self.canvas;c.delete('all');w=max(c.winfo_width(),200);h=max(c.winfo_height(),200)
         yellow='#eeef35';white='#e6f1ff';muted='#91a7bd'
         font_size=max(12,min(21,int(w/47)));font=('Consolas',font_size,'bold')
         left,top,right,bottom=22,48,w-22,h-58
+        self.plot_bounds=(left,top,right,bottom)
         c.create_rectangle(0,0,w,40,fill='#172433',outline='')
         c.create_rectangle(left,7,left+112,34,fill=yellow,outline='',tags='trigger_control')
         trigger=('Auto','Normal','Single')[self.metadata.get('trigger_mode',0)%3]
         c.create_text(left+56,20,text=trigger,fill='#283127',font=('Consolas',16,'bold'),tags='trigger_control')
         c.tag_bind('trigger_control','<Button-1>',lambda event:self.popup_control('trigger_mode',event))
         c.create_text(left+143,20,text='T',fill=yellow,font=('Consolas',20,'bold'))
-        c.create_text(right,20,text='USB  '+self.mode,anchor='e',fill='#85ed95' if self.mode=='RUN' else muted,font=('Consolas',13,'bold'))
+        c.create_text(right,20,text='USB  '+self.tr(self.mode),anchor='e',fill='#85ed95' if self.mode=='RUN' else muted,font=('Consolas',13,'bold'))
         for i in range(11):
             x=left+(right-left)*i/10;c.create_line(x,top,x,bottom,fill='#8298b1' if i==5 else '#4c6077',dash=(1,6),width=1)
         for i in range(9):
@@ -146,10 +274,24 @@ class Scope:
                 plotted=self.samples[start:start+300]
                 minimum=self.metadata.get('offset_raw',0)-99
                 maximum=self.metadata.get('offset_raw',0)+99
+            xcentre=(len(plotted)-1)/2+self.pan_x
+            xspan=max(1,len(plotted)-1)/self.zoom_x
+            xmin,xmax=xcentre-xspan/2,xcentre+xspan/2
+            ycentre=(minimum+maximum)/2+self.pan_y
+            yspan=(maximum-minimum)/self.zoom_y
+            minimum,maximum=ycentre-yspan/2,ycentre+yspan/2
+            self.view_bounds=(xmin,xmax,minimum,maximum)
             coordinates=[]
             for index,value in enumerate(plotted):
-                coordinates.append((left+(right-left)*index/max(1,len(plotted)-1),bottom-(value-minimum)*(bottom-top)/(maximum-minimum)))
+                if index<xmin-1 or index>xmax+1:continue
+                coordinates.append((left+(right-left)*(index-xmin)/(xmax-xmin),bottom-(value-minimum)*(bottom-top)/(maximum-minimum)))
             for (x1,y1),(x2,y2) in zip(coordinates,coordinates[1:]):
+                if max(x1,x2)<left or min(x1,x2)>right:continue
+                if x1!=x2:
+                    if x1<left:
+                        y1+=(y2-y1)*(left-x1)/(x2-x1);x1=left
+                    if x2>right:
+                        y2=y1+(y2-y1)*(right-x1)/(x2-x1);x2=right
                 if max(y1,y2)<top or min(y1,y2)>bottom:continue
                 if y1!=y2:
                     if y1<top or y1>bottom:
@@ -171,13 +313,14 @@ class Scope:
         else:
             first=['Max : —','Min : —','Avg : —','RMS : —']
             second=['P-P : —','Fre : — Hz','Dut : — %','Cyc : — ms']
-            c.create_text(w/2,top+(bottom-top)*0.6,text='Cihaz verisi bekleniyor',fill=muted,font=('Segoe UI',16))
+            c.create_text(w/2,top+(bottom-top)*0.6,text=self.tr('Cihaz verisi bekleniyor'),fill=muted,font=('Segoe UI',16))
+        c.create_text(right-8,bottom-12,text=f'X ×{self.zoom_x:.2f}  Y ×{self.zoom_y:.2f}',anchor='se',fill=muted,font=('Consolas',10))
         # Measurements overlay the grid, matching the handheld screen's two columns.
         for col,items in enumerate((first,second)):
             x=left+15+col*(right-left)*0.52
             for row,text in enumerate(items):
                 c.create_text(x,top+17+row*(font_size+7),text=text,anchor='nw',fill=white,font=font)
-        c.create_text(right-8,top+17+4*(font_size+7),text='CİHAZ ÖLÇÜMÜ' if device_values else 'HAM GÖRÜNÜM',anchor='ne',fill=muted,font=('Consolas',10))
+        c.create_text(right-8,top+17+4*(font_size+7),text=self.tr('CİHAZ ÖLÇÜMÜ' if device_values else 'HAM GÖRÜNÜM'),anchor='ne',fill=muted,font=('Consolas',10))
         labels=[f'{division:g} ham/div','— X','60 örn/div','HAM',self.mode]
         if device_values:
             labels=[SCALE_LABELS[self.metadata['scale_index']],('X1','X10')[self.metadata['probe_index']],TIME_LABELS[self.metadata['timebase_index']],('AC','DC')[self.metadata['coupling_index']],self.mode]
@@ -186,7 +329,7 @@ class Scope:
             color='#2d58da' if index==3 else ('#8de78c' if index==4 and self.mode=='RUN' else yellow)
             tag='run' if index==4 else ('scale_index','probe_index','timebase_index','coupling_index')[index]
             c.create_rectangle(x1,bottom+9,x2,h-10,fill=color,outline='',tags=tag)
-            c.create_text((x1+x2)/2,(bottom+9+h-10)/2,text=label,fill=white if index==3 else '#213024',font=('Consolas',max(10,font_size-3),'bold'),tags=tag)
+            c.create_text((x1+x2)/2,(bottom+9+h-10)/2,text=label if label in ('RUN','HOLD') else self.tr(label),fill=white if index==3 else '#213024',font=('Consolas',max(10,font_size-3),'bold'),tags=tag)
             if index<4:c.tag_bind(tag,'<Button-1>',lambda event,n=tag:self.popup_control(n,event))
         c.tag_bind('run','<Button-1>',lambda event:self.toggle_run())
     def popup_control(self,name,event):
@@ -206,13 +349,31 @@ class Scope:
             writer=csv.writer(output);writer.writerow(['sample_index','display_displacement'])
             writer.writerows(enumerate(self.samples))
         self.status.set('Ham örnekler kaydedildi: '+path)
-    def close(self):self.stop.set();self.root.destroy()
+    def close(self):
+        if self.updating:
+            messagebox.showwarning(self.tr('Firmware yükleniyor'),self.tr('Yükleme tamamlanana kadar pencereyi ve USB bağlantısını açık bırakın.'));return
+        self.stop.set();self.root.destroy()
 
 def main():
     import argparse
-    parser=argparse.ArgumentParser();parser.add_argument('--connect',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--connect',action='store_true')
+    parser.add_argument('--self-test',action='store_true');parser.add_argument('--self-test-report',type=Path,default=Path('self-test.json'));args=parser.parse_args()
+    if args.self_test:
+        import hashlib
+        from .updater import bundled_firmware,PATCH_SHA
+        report={}
+        try:
+            image=bundled_firmware()
+            report['firmware_sha256']=hashlib.sha256(image.read_bytes()).hexdigest()
+            if report['firmware_sha256']!=PATCH_SHA:raise ValueError('Firmware hash mismatch')
+            root=tk.Tk();root.withdraw();scope=Scope(root);root.update();scope.draw();scope.close()
+            report.update(ok=True,tkinter=True,version='1.0.0')
+        except Exception as error:report.update(ok=False,error=str(error))
+        args.self_test_report.write_text(json.dumps(report,indent=2),encoding='utf-8')
+        if not report['ok']:raise SystemExit(1)
+        return
     root=tk.Tk();scope=Scope(root)
-    if args.connect:root.after(250,scope.start)
+    root.after(250,scope.start)
     root.mainloop()
 
 

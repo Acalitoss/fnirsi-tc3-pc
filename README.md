@@ -2,7 +2,21 @@
   <img src="assets/retro-saver-logo.png" alt="Retro Saver" width="520">
 </p>
 
-# FNIRSI DSO-TC3 PC
+# FNIRSI DSO-TC3 PC v1.0
+
+[Türkçe](#türkçe) · [English](#english) · [Downloads / İndir](https://github.com/Acalitoss/fnirsi-tc3-pc/releases/latest)
+
+<p align="center"><img src="assets/dso-tc3.png" alt="FNIRSI DSO-TC3" width="360"></p>
+
+## Türkçe
+
+Windows için Releases sayfasındaki EXE dosyasını indirin; Python kurulumu gerekmez. USB üzerinden bağlanın. Stok cihazda önce **Firmware kur** düğmesiyle desteklenen yamayı yükleyin (▼ + güç: Bootloader OK); yüklemeden sonra cihazı açıp osiloskop ekranına geçin. EXE yamayı içerir; ayrı `.s19` ve `SHA256SUMS.txt` dosyaları da sürüme eklenir.
+
+Üst menüden **Türkçe / English** seçilebilir; dil tercihi saklanır.
+
+**Zoom:** X/Y +/− düğmeleri, fare tekerleği (X), Shift + tekerlek (Y), sürükleyerek kaydırma ve çift tıklayarak sıfırlama. **Dalgalanmayı ortala** küçük değişimleri ortalayıp büyütür. Sabit kareyi incelemek için PC duraklatmayı kullanın. Zoom yeni örnek üretmez, cihaz çözünürlüğünü artırmaz ve cihaz ölçek ayarlarını değiştirmez.
+
+**Tools ve 0–40 V girişinden devamlılık ölçümü v1.0 içinde desteklenmez.** Bu girişte gerçek devamlılık ölçümü için test akımı ve donanım yolu ayrıca doğrulanmalıdır; yalnızca gerilim okumasından devamlılık sonucu çıkarılmaz.
 
 DSO-TC3 V0.3 için deneysel PC osiloskop arayüzü ve USB firmware yaması. Python/Tkinter arayüzü cihazın ekran düzenini izler; ölçüm değerlerini doğrudan cihazdan okur ve ayar değişikliklerini cihazdan geri okuyarak doğrular.
 
@@ -29,7 +43,7 @@ python -m pip install -e .
 python -m fnirsi_tc3 --connect
 ```
 
-Alternatif: `fnirsi-tc3 --connect`. Arayüzde doğru seri portu seçin; örnek cihaz COM7 olarak tanındı. Uygulama arayüzü Türkçedir.
+Alternatif: `fnirsi-tc3 --connect`. Arayüzde doğru seri portu seçin; örnek cihaz COM7 olarak tanındı. Uygulama arayüzünde Türkçe ve İngilizce seçilebilir.
 
 **Stok V0.3 firmware canlı ölçüm ve PC kontrolünü desteklemez.** Bu işlevler aşağıdaki deneysel yamanın cihaza yüklenmesini gerektirir. Uygulama stok cihazdan yalnızca mevcut yapılandırma sorgusunu okuyabilir.
 
@@ -87,3 +101,59 @@ python -m unittest discover -s tests -v
 [Protokol ve bellek haritası](docs/PROTOCOL.md) · [Katkı yönergeleri](CONTRIBUTING.md) · [Lisans](LICENSE)
 
 MIT lisansı yalnızca bu projedeki koda uygulanır. FNIRSI firmware'i, güncelleme programı, marka ve ürün adları kendi hak sahiplerine aittir.
+
+
+## English
+
+Experimental USB oscilloscope interface and firmware patch for **FNIRSI DSO-TC3 V0.3**. This is an independent project, tested on one Windows computer and one device. Modifying firmware can make the device unusable. Voltage accuracy has not been independently calibrated.
+
+### Windows quick start
+
+1. Download the standalone Windows x64 EXE from [Releases](https://github.com/Acalitoss/fnirsi-tc3-pc/releases/latest). No Python installation is required.
+2. Connect the supported device by USB. For stock firmware, select **Install firmware** in the app; power off the device and hold **▼ + power** to enter `Bootloader OK`. Keep the original vendor firmware for recovery.
+3. After upload, power on the device and open its oscilloscope screen. The app detects a single supported USB device automatically.
+4. Choose **English** or **Türkçe** in the toolbar. The preference is saved.
+
+The EXE includes the verified patch. A separate patched `.s19` file and SHA-256 checksums are provided as release assets. Stock firmware cannot stream waveform data or accept these PC controls.
+
+### Features and zoom
+
+- Read 600 signed display displacement words and display the device's trigger-selected 300-point window.
+- Show the device's Vmax, Vmin, Vavg, Vrms, Vpp, frequency, duty cycle and period.
+- Adjust V/div, probe, timebase, AC/DC and trigger; read settings back from the device.
+- Device RUN/HOLD, separate PC pause and CSV export.
+- X/Y zoom buttons; mouse wheel for horizontal zoom, Shift + wheel for vertical zoom. Drag to pan; double-click or Reset view to reset. Centre ripple centres and magnifies small changes. Pause the PC view for detailed inspection.
+
+Zoom changes the PC view only. It does not add samples, increase measurement resolution or change device settings. Hardware-verified controls are **V/div, timebase and RUN/HOLD**; the remaining controls have not received equivalent physical validation.
+
+### Limitations
+
+Tools and continuity testing through the **0–40 V input are not supported in v1.0**. The required test current and hardware path still need validation. Voltage readings alone cannot establish continuity.
+
+Displayed voltages are calculated by the DSO-TC3, not read from or controlled on the laboratory power supply. Sample words are display displacements, not raw ADC codes; CSV uses `display_displacement`. Pages are read sequentially without an atomic frame snapshot; use device HOLD for a stable capture. High-frequency accuracy and frequency/duty measurements have not been independently verified.
+
+### Build from source
+
+Requires Python 3.10+ and Tkinter:
+
+```powershell
+python -m pip install -e ".[firmware,dev]"
+python -m fnirsi_tc3
+python -m unittest discover -s tests -v
+python scripts/build_patch.py --firmware "vendor/DSO-TC3_V0.3.s19"
+```
+
+On Windows, install PyInstaller and build the standalone app:
+
+```powershell
+python -m pip install pyinstaller
+python scripts/build_windows.py --firmware "vendor/DSO-TC3_V0.3.s19"
+```
+
+The patch builder accepts only stock SHA-256 `9a97d5bb1a5864af6484b92f115ae827e16e3972f5ec8828362c358ba2430b61`. The resulting patched SHA-256 is `97c601b5c02b2169e51275a6b5e7328f2919d3101c6a53bbdf8807274eb5c5ac`. Never force this patch onto another firmware or hardware revision. To run the firmware emulation tests, set `TC3_STOCK_FIRMWARE` to the original vendor file path.
+
+For command-line upload, close the viewer, enter `Bootloader OK` and run `python scripts/flash.py --image build/DSO-TC3_V0.3_USB_EXPERIMENTAL.s19`. If the bootloader remains accessible, the same tool can upload the original supported vendor image for recovery.
+
+[Protocol](docs/PROTOCOL.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE)
+
+The MIT license covers project code only. Vendor firmware and brand assets remain the property of their respective rights holders. This is not official FNIRSI software.
