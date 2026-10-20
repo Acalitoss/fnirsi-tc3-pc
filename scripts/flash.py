@@ -30,7 +30,8 @@ def upload(path,port_name):
     import serial
     from serial.tools import list_ports
     data=path.read_bytes()
-    expected_hashes={'9a97d5bb1a5864af6484b92f115ae827e16e3972f5ec8828362c358ba2430b61'}
+    expected_hashes={'9a97d5bb1a5864af6484b92f115ae827e16e3972f5ec8828362c358ba2430b61',
+                     '8122bd0b8f564c4ce08cd9eecb78c70c3cbcacf15d2beb5cfb8db8d2402146eb'}
     manifest_path=root/'build/manifest.json'
     if manifest_path.exists():expected_hashes.add(json.loads(manifest_path.read_text())['output_sha256'])
     digest=hashlib.sha256(data).hexdigest()

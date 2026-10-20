@@ -50,3 +50,14 @@ Sys base is `20000668`. Offsets:
 UI focus is at `20000144`. Measurement offsets were traced to the stock screen formatting routine at `08011B38`. Sample words at Sys+`594` are **signed display displacements after ADC conversion**, not raw ADC codes. The stock drawing path renders a trigger-selected 300-point window.
 
 State pages and sample pages are not an atomic snapshot. Host and device setting values may briefly differ while the acquisition loop updates; independent accuracy and AC timing validation remain open work.
+
+
+## Development protocol 3
+
+Metadata signature is `A5 5A 21 03`. State pages 0–31 each return 56 bytes, covering a fixed 1792-byte range starting at `0x20000668`. No arbitrary address reads or writes are provided. Remote short keys 1/2/4/8/16/32 mean Back/OK/Left/Up/Right/Down; long-left is 0x84. Accepted only in modes 1–6. Power and long-OK are excluded. The original firmware dispatcher processes the key mailbox; the PC never calls hardware functions directly.
+
+Mode values: 1 Home, 2 M-Tester, 3 Oscilloscope, 4 Generator, 5 Tools, 6 Settings. Home index at +0x1c: Tester/Scope/Generator/Tools. Instrument selection at +0x94: Generator Sine/Square/Pulse/Triangle/Ramp/DC; Tools ON-OFF/Voltage/DS18B20/DHT11/IR Decode/Calibrate.
+
+Generator fields: +0x48 uint frequency Hz; +0x4c uint duty percent; +0x50 float amplitude V. Tools +0xd8 float voltage; +0x13c temperature; +0x140 humidity; +0x150 IR received byte; +0x154 IR code. Sensor values are shown only for corresponding result types 18/19. M-Tester union +0xe0 type, +0xe8/+0xec/+0xf0 zero-based pin indices. Result float fields are type-dependent, not interchangeable with oscilloscope fields. See instrument.py; several device result types still need full decoding and physical validation.
+
+Real-device check: four mode changes and return to home, all six generator wave selections, 5000→6000→5000 Hz readback, Tools indices 0–4, and OK-triggered component test. Test socket was not populated with a reference component during this check. Calibration was not executed. Only oscilloscope mode reads waveform pages; other modes return no waveform, avoiding stale traces.

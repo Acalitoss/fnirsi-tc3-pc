@@ -1,5 +1,21 @@
 """Turkish/English UI strings. Measurements and device data are never translated."""
 EN={
+ 'Ana menü':'Home','Osiloskop':'Oscilloscope','Ayarlar':'Settings','Geri':'Back','Kenar':'Edge','OK / Test':'OK / Test',
+ 'Mod ve tuş işlemleri cihazdan geri okunur.':'Mode and key operations are read back from the device.',
+ 'Bu bölümler için çoklu mod firmware v3 gerekiyor.':'These sections require multi-mode firmware v3.',
+ 'Önce USB bağlantısını başlatın.':'Connect USB first.',
+ 'Üst menüden bir cihaz bölümü seçin.':'Choose a device section above.',
+ 'Seçili mod ve değerler USB üzerinden cihazdan okunur.':'Current mode and values are read from the device over USB.',
+ '▶ alan / basamak seçer · ◀ geri · ▲/▼ değeri değiştirir. Çıkış cihazdadır.':'▶ selects field / digit · ◀ goes back · ▲/▼ changes value. Output is on the device.',
+ 'Sensör bekleniyor':'Waiting for sensor','IR sinyali bekleniyor':'Waiting for IR signal',
+ 'Devamlılık sonucu cihazın sesinden izlenir.':'Monitor continuity using the device buzzer.',
+ 'Standart 1-2-3 girişi; 0–40 V girişine taşınmadı.':'Standard 1-2-3 input; not rerouted to the 0–40 V input.',
+ 'Kalibrasyon adımları için cihaz ekranını izleyin.':'Follow calibration steps on the device screen.',
+ '▲/▼ araç seçer. Voltaj girişi: 0–40 V. Diğer testler cihazın standart girişlerini kullanır.':'▲/▼ selects tool. Voltage input: 0–40 V. Other tests use the standard device inputs.',
+ 'Ayrıntılı eleman değerleri cihaz ekranında.':'Detailed component values are on the device screen.',
+ 'Elemanı 1-2-3 soketine bağlayın. OK / Test ölçümü başlatır.':'Connect the component to the 1-2-3 socket. OK / Test starts measurement.',
+ 'Cihazın yön ve OK tuşlarını kullanın.':'Use the device direction and OK keys.',
+
  'Sıfırla':'Reset view','Dalgalanmayı ortala':'Centre ripple',
  'Tekerlek: X zoom · Shift: Y zoom · Sürükle: kaydır':'Wheel: X zoom · Shift: Y zoom · Drag: pan',
  'Başlat':'Connect','HOLD':'Pause PC','CSV kaydet':'Save CSV','Firmware kur':'Install firmware',

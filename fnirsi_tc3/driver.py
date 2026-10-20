@@ -16,7 +16,7 @@ SCALE_LABELS=('10mV','20mV','50mV','100mV','200mV','500mV','1V','2V','5V','10V')
 TIME_LABELS=('1us','2us','5us','10us','20us','50us','100us','200us','500us','1ms','2ms','5ms','10ms','20ms','50ms','100ms','200ms','500ms','1s','2s','5s','10s')
 
 def parse_state(data):
-    if len(data)!=224:raise ValueError('State snapshot must contain 224 bytes')
+    if len(data) not in (224,1792):raise ValueError('State snapshot must contain 224 bytes')
     integer=lambda offset:struct.unpack_from('<I',data,offset)[0]
     result={name:integer(offset) for name,offset in {'device_mode':0x20,'scale_index':0x28,'probe_index':0x2c,'timebase_index':0x30,'coupling_index':0x34,'trigger_mode':0x3c,'trigger_edge':0x40,'trigger_sample':0xa8}.items()}
     result['offset_raw']=struct.unpack_from('<i',data,0x24)[0]
@@ -69,6 +69,7 @@ class TC3:
 
     def read_waveform(self):
         metadata=self.read_metadata()
+        if metadata.get('device_mode',3)!=3:return metadata,[]
         samples=[]
         for page in range(21):
             count=29 if page<20 else 20
@@ -89,26 +90,31 @@ class TC3:
 
     def read_metadata(self):
         packet=self._request(b'\x21\x00',24)
-        if packet[:3]!=b'\xa5\x5a\x21' or packet[3] not in (1,2):
+        if packet[:3]!=b'\xa5\x5a\x21' or packet[3] not in (1,2,3):
             raise ValueError(f'Experimental firmware signature absent: {packet.hex()}')
         offset,scale,timebase,rate,count=struct.unpack('<iIIfI',packet[4:])
         metadata={'offset_raw':offset,'scale_index':scale,'timebase_index':timebase,
                 'sample_rate_raw':rate,'sample_count':count,'protocol_version':1}
-        if packet[3]==2:
-            metadata.update(protocol_version=2,focus=count,sample_count=600)
+        self.protocol_version=packet[3]
+        if packet[3]>=2:
+            metadata.update(protocol_version=packet[3],focus=count,sample_count=600)
             metadata.update(self.read_state())
         return metadata
 
     def read_state(self):
         result=bytearray()
-        for page in range(4):
+        for page in range(32 if getattr(self,'protocol_version',2)>=3 else 4):
             packet=self._request(bytes([0x22,page]),60)
             if packet[:4]!=bytes([0xa5,0x5a,page,56]):raise ValueError('Invalid state page')
             result.extend(packet[4:])
-        return parse_state(bytes(result))
+        state=parse_state(bytes(result))
+        if len(result)>224:
+            from .instrument import parse_instrument_state
+            state.update(parse_instrument_state(bytes(result)))
+        return state
 
     def press_key(self,key):
-        if key not in (2,4,8,16,32,0x84):raise ValueError('Unsupported remote key')
+        if key not in ((1,2,4,8,16,32,0x84) if getattr(self,'protocol_version',2)>=3 else (2,4,8,16,32,0x84)):raise ValueError('Unsupported remote key')
         for attempt in range(8):
             response=self._request(bytes([0x30,key]),4)
             if response[:3]!=b'\xa5\x5a\x30':raise ValueError('Invalid remote key response')
@@ -124,6 +130,37 @@ class TC3:
             time.sleep(0.08)
         raise RuntimeError('Device key handler remained busy')
 
+    def select_mode(self,name):
+        from .instrument import MODES
+        if name not in MODES:raise ValueError('Unknown mode')
+        state=self.read_metadata()
+        if state['protocol_version']<3:raise RuntimeError('Multi-mode control requires firmware v3')
+        target=MODES[name]
+        if state['device_mode']==target:return state
+        if state['device_mode']!=1:
+            self.press_key(1);state=self.read_metadata()
+        if state['device_mode']!=1:raise RuntimeError('Device did not return to home screen')
+        if target==1:return state
+        index={'tester':0,'oscilloscope':1,'generator':2,'tools':3}[name]
+        for _ in range(4):
+            if state.get('home_selection')==index:break
+            self.press_key(16);state=self.read_metadata()
+        if state.get('home_selection')!=index:raise RuntimeError('Home selection readback failed')
+        self.press_key(2);state=self.read_metadata()
+        if state['device_mode']!=target:raise RuntimeError('Mode change readback failed')
+        return state
+    def select_item(self,index):
+        state=self.read_metadata()
+        if state['protocol_version']<3:raise RuntimeError('Multi-mode control requires firmware v3')
+        if state['device_mode'] not in (4,5):raise RuntimeError('Open Generator or Tools first')
+        if not 0<=index<=5:raise ValueError('Item out of range')
+        if state['device_mode']==4:
+            self.press_key(4);self.press_key(4);state=self.read_metadata()
+        for _ in range(12):
+            current=state['instrument_selection']
+            if current==index:return state
+            self.press_key(8 if current<index else 32);state=self.read_metadata()
+        raise RuntimeError('Selection was not applied; exit the digit editor with LEFT and retry')
     def set_control(self,name,value):
         controls={'scale_index':(2,9),'probe_index':(3,1),'timebase_index':(4,21),'coupling_index':(5,1),'trigger_edge':(7,1),'trigger_mode':(8,2)}
         state=self.read_metadata()

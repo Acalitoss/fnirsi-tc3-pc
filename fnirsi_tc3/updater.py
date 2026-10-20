@@ -4,17 +4,17 @@ import hashlib,struct,sys,time
 import serial
 from serial.tools import list_ports
 
-PATCH_SHA='97c601b5c02b2169e51275a6b5e7328f2919d3101c6a53bbdf8807274eb5c5ac'
+PATCH_SHA='8122bd0b8f564c4ce08cd9eecb78c70c3cbcacf15d2beb5cfb8db8d2402146eb'
 
 def device_ports():
     return [p.device for p in list_ports.comports() if p.vid==0x19f5 and p.pid==0x5740]
 
 def bundled_firmware():
     root=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parents[1]))
-    candidates=[root/'firmware/DSO-TC3-PC-v1.0-patched.s19',root/'build/DSO-TC3_V0.3_USB_EXPERIMENTAL.s19']
+    candidates=[root/'firmware/DSO-TC3-PC-v1.1-dev-patched.s19',root/'build/v3/DSO-TC3_V0.3_USB_EXPERIMENTAL.s19']
     for candidate in candidates:
         if candidate.is_file():return candidate
-    raise FileNotFoundError('Firmware bulunamadı. GitHub v1.0 Release paketini kullanın.')
+    raise FileNotFoundError('Firmware bulunamadı. Çoklu mod geliştirme paketini kullanın.')
 
 def packet(command,counter,payload=b''):
     result=struct.pack('<BH',command,counter)+bytes([len(payload)])+payload

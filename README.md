@@ -8,6 +8,20 @@
 
 <p align="center"><img src="assets/dso-tc3.png" alt="FNIRSI DSO-TC3" width="360"></p>
 
+## Çoklu mod geliştirme sürümü / Multi-mode development build
+
+**v1.1-dev** kaynak kodu ve yerel EXE, dört ana bölüm arasında cihazla eş zamanlı geçişi destekler. Bu geliştirme sürümü, v1.0 Release paketinden farklıdır ve **protokol 3 firmware** gerektirir. Eski firmware ile çoklu mod komutları gönderilmez.
+
+- Ana menü: M-Tester, Osiloskop, Generator, Tools; mod değişikliği cihazdan geri okunur.
+- Generator: Sine, Square, Pulse, Triangle, Ramp, DC; cihazın frekans, genlik ve görev oranını gösterir. Yön tuşları alan/basamak ve değer değiştirir. 5 kHz → 6 kHz → 5 kHz değişimi doğrulandı; çıkış dalgasının elektriksel doğruluğu ayrıca ölçülmedi.
+- Tools: ON-OFF, Voltage, DS18B20, DHT11, IR Decode, Calibrate seçimi. Voltaj/sensör/IR alanları cihazdan okunur. Sensör doğruluğu ve kalibrasyon işlemi fiziksel doğrulamadan geçmedi. Devamlılık, standart test soketi ve cihaz sesini kullanır; 0–40 V girişine taşınmadı.
+- M-Tester: OK/Test başlatma, tür ve pin okuma; direnç, kapasitör, bobin, diyot, pil, zener ve BJT için çözümlenen sayısal alanlar. Diğer türlerin ayrıntıları cihaz ekranından izlenir. Bilinen elemanlarla kapsamlı ölçüm doğrulaması bekleniyor.
+- Ortak OK, geri ve dört yön tuşu; osiloskopta AUTO, tetik kenarı ve mevcut ölçek/zoom kontrolleri.
+
+Build `scripts/build_windows.py` now produces the **v1.1-dev** EXE with the protocol 3 patch. The standalone application can switch between the four device modes and operate the native direction/OK/back keys. Mode transitions, all six generator selections and a reversible frequency change were verified on one physical device. Tools selection works; sensor accuracy and calibration remain unverified. M-Tester result decoding is partial; details for unsupported types remain on the device screen. Continuity still uses the standard test socket and device buzzer, not the 0–40 V input. Power control and long-OK calibration are not exposed remotely.
+
+Build patch: `python scripts/build_patch_v3.py --firmware vendor/DSO-TC3_V0.3.s19`. Output: `build/v3/`. Protocol 3 SHA-256: `8122bd0b8f564c4ce08cd9eecb78c70c3cbcacf15d2beb5cfb8db8d2402146eb`.
+
 ## Türkçe
 
 Windows için Releases sayfasındaki EXE dosyasını indirin; Python kurulumu gerekmez. USB üzerinden bağlanın. Stok cihazda önce **Firmware kur** düğmesiyle desteklenen yamayı yükleyin (▼ + güç: Bootloader OK); yüklemeden sonra cihazı açıp osiloskop ekranına geçin. EXE yamayı içerir; ayrı `.s19` ve `SHA256SUMS.txt` dosyaları da sürüme eklenir.

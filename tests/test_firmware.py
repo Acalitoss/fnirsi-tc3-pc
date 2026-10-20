@@ -10,19 +10,19 @@ HANDLER=0x08013f08; TX=0x08005158; RETURN=0x0803f000
 BUFFER=0x2000b69c; STACK=0x20018e00; SYS=0x20000668; SAMPLES=SYS+0x594
 KNOWN=struct.pack('>4I',5000,5136,20000,20263)
 
-def execute(request,original=False,version=1,key_status=0,return_state=False):
+def execute(request,original=False,version=1,key_status=0,return_state=False,image_path=None,device_mode=3):
     uc=Uc(UC_ARCH_ARM,UC_MODE_THUMB)
     uc.mem_map(0x08000000,0x100000)
     uc.mem_map(0x20000000,0x20000)
     if original:
         image=(root/'build/original-decoded.bin').read_bytes()[64:]
     else:
-        image=(root/'build/application-decoded.bin').read_bytes()
+        image=Path(image_path or root/'build/application-decoded.bin').read_bytes()
     uc.mem_write(0x08004000,image)
     uc.mem_write(SYS+0x7c,struct.pack('<4I',5000,5136,20000,20263))
     uc.mem_write(SYS+0x24,struct.pack('<4I',123,4,0,7))
     uc.mem_write(SYS+0xb0,struct.pack('<f',10000000.0))
-    uc.mem_write(SYS+0x20,struct.pack('<I',3))
+    uc.mem_write(SYS+0x20,struct.pack('<I',device_mode))
     uc.mem_write(SYS+0x90,bytes([key_status,0]))
     uc.mem_write(0x20000144,struct.pack('<I',2))
     uc.mem_write(0x20000140,b'\x01')
